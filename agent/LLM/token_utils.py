@@ -20,18 +20,19 @@ def read_config(toml_path: Optional[str] = None) -> Dict:
 
 def is_model_supported(model_name: str) -> bool:
     """Check if the model is supported in the configuration.
-    
+
+    After OpenRouter migration, all models are supported.
+    This function is kept for backward compatibility.
+
     Args:
         model_name: Name of the model to check
-        
+
     Returns:
-        bool indicating whether the model is supported
+        bool indicating whether the model is supported (always True for OpenRouter)
     """
-    try:
-        config = read_config()
-        return model_name in config["token_pricing"]["pricing_models"]
-    except:
-        return False
+    # All models are supported via OpenRouter
+    # Legacy pricing check disabled
+    return True
 
 def estimate_tokens(text: str) -> float:
     """Estimate the number of tokens for a given text.

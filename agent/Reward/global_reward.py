@@ -54,19 +54,22 @@ class InteractionMode:
             print_info(
                 f"Global_Reward_Request:\n{print_limited_json(reward_request, limit=1000)}", "\033[32m")  # green
             response_str = ""
+            usage_data = {}
             for i in range(3):
                 try:
                     if "vision" in global_reward_mode:
                         # TODO
-                        response_str, error_message = await self.visual_model.request(reward_request)
+                        response_str, error_message, usage_data = await self.visual_model.request(reward_request)
                     else:
                         print_info(
                             f"using gpt_global_reward_text: {self.text_model.model}", "purple")
-                        response_str, error_message = await self.text_model.request(reward_request)
+                        response_str, error_message, usage_data = await self.text_model.request(reward_request)
                     reward_response = ActionParser().extract_status_and_description(
                         response_str)
-                    input_token_count = calculation_of_token(reward_request, model=self.text_model.model)
-                    output_token_count = calculation_of_token(response_str, model=self.text_model.model)
+
+                    # Extract token counts from API usage data
+                    input_token_count = usage_data.get("prompt_tokens", 0)
+                    output_token_count = usage_data.get("completion_tokens", 0)
                     reward_input_token_count += input_token_count
                     reward_output_token_count += output_token_count
                     reward_token_count = [reward_input_token_count, reward_output_token_count]
@@ -101,13 +104,13 @@ class GlobalReward:
         ground_truth_data,
     ):
 
-        gpt4v = GPTGenerator(model="gpt-4-turbo")
+        # Use OpenRouter for all models
+        gpt4v = create_llm_instance(model="openai/gpt-4-turbo")
 
-        all_json_models = config["model"]["json_models"]
         is_json_response = config["model"]["json_model_response"]
 
         llm_global_reward_text = create_llm_instance(
-            model_name, is_json_response, all_json_models)
+            model_name, is_json_response)
         
         _, reward_response, reward_token_count = await InteractionMode(text_model=llm_global_reward_text, visual_model=gpt4v).get_global_reward(
             user_request=user_request, previous_trace=previous_trace, observation=observation,

@@ -39,7 +39,8 @@ def validate_config(config, observation_mode, global_reward_mode, observation_mo
     task_mode = config['basic']['task_mode']
     batch_tasks_file_path = config['files']['batch_tasks_file_path']
     json_model_response = config['model']['json_model_response']
-    all_json_models = config['model']['json_models']
+    # After OpenRouter migration, json_models list no longer needed
+    # all_json_models = config['model']['json_models']
     interaction_mode = config['steps']['interaction_mode']
 
     if observation_mode not in ["dom"]:
@@ -52,10 +53,10 @@ def validate_config(config, observation_mode, global_reward_mode, observation_mo
             "interaction_mode is not defined! Try to define whether you want to evaluate the agent in an interactive manner.")
         exit()
 
-    if json_model_response and (observation_model not in all_json_models or (
-            global_reward_mode != 'no_global_reward' and global_reward_model not in all_json_models)):
-        logger.error("Model does not support JSON mode!")
-        exit()
+    # JSON mode validation removed - OpenRouter handles this with graceful degradation
+    # if json_model_response and (observation_model not in all_json_models or ...):
+    #     logger.error("Model does not support JSON mode!")
+    #     exit()
 
     if task_mode == 'batch_tasks' and not os.path.exists(batch_tasks_file_path):
         logger.error("batch_tasks_file_path not exist!")
@@ -138,7 +139,10 @@ async def run_experiment(task_range, experiment_config):
                 experiment_config.global_reward_text_model):
             if not os.path.exists("token_results"):
                 os.makedirs("token_results")
-            token_counts_filename = f"token_results/token_counts_{experiment_config.record_time}_{experiment_config.planning_text_model}_{experiment_config.global_reward_text_model}.json"
+            # Sanitize model names for filename (replace / with -)
+            safe_planning_model = experiment_config.planning_text_model.replace('/', '-')
+            safe_reward_model = experiment_config.global_reward_text_model.replace('/', '-')
+            token_counts_filename = f"token_results/token_counts_{experiment_config.record_time}_{safe_planning_model}_{safe_reward_model}.json"
 
         await run_task(mode=experiment_config.mode,
                        task_mode=experiment_config.config['basic']['task_mode'],
@@ -223,8 +227,9 @@ if __name__ == "__main__":
     parser.add_argument("--index", type=str, default=-1)
     parser.add_argument("--single_task_name", type=str,
                         default="Find Dota 2 game and add all DLC to cart in steam.")
-    parser.add_argument("--planning_text_model", type=str, default="gpt-4o-mini")
-    parser.add_argument("--global_reward_text_model", type=str, default="gpt-4o-mini")
+    # Use OpenRouter model format: provider/model-name
+    parser.add_argument("--planning_text_model", type=str, default="openai/gpt-4o-mini")
+    parser.add_argument("--global_reward_text_model", type=str, default="openai/gpt-4o-mini")
 
     args = parser.parse_args()
 

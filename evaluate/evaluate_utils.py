@@ -11,8 +11,13 @@ from agent.Environment import ActionExecutionError, create_action
 from agent.Plan import Planning
 from agent.Utils.utils import save_screenshot, is_valid_base64
 from agent.Reward.global_reward import GlobalReward
-from evaluate import FinishTaskEvaluator, TaskLengthEvaluator, URLEvaluator, ElementEvaluator, TextEvaluator
+from evaluate import FinishTaskEvaluator, TaskLengthEvaluator, URLEvaluator, TextEvaluator
+from evaluate.step_score import ElementEvaluator as ElementEvaluator6Param
+from evaluate.step_score_js import ElementEvaluator as ElementEvaluator4Param
 from logs import logger
+from agent.LLM.token_calculator import save_token_count_to_file
+from urllib.parse import urlparse
+import json 
 
 
 def read_file(file_path: str = "./data/example/example_130.json") -> List[List]:
@@ -157,7 +162,7 @@ async def step_evaluate(page: Page, evaluate_steps=[], input_path=None, element_
             elif match_function == "element_path_exactly_match":
                 input_netloc = get_netloc(page.url)
                 method = evaluate["method"]
-                score = ElementEvaluator.path_exact_match(
+                score = ElementEvaluator6Param.path_exact_match(
                     input_path, evaluate["reference_answer"], method, await page.content(), input_netloc,
                     evaluate["netloc"])
                 # print(score, "path_exact_match:", input_path,
@@ -173,17 +178,17 @@ async def step_evaluate(page: Page, evaluate_steps=[], input_path=None, element_
                     # print(element_value)
                     # print(await page.locator(input_path).input_value())
                     if "path" in evaluate.keys():
-                        path_score = ElementEvaluator.path_exact_match(input_path, evaluate["path"], "selector",
+                        path_score = ElementEvaluator6Param.path_exact_match(input_path, evaluate["path"], "selector",
                                                                        await page.content(), input_netloc,
                                                                        evaluate["netloc"])
                         if path_score == 0:
                             # print("Path mismatch in value evaluation")
                             score = 0
                         else:
-                            score = ElementEvaluator.element_value_exact_match(
+                            score = ElementEvaluator6Param.element_value_exact_match(
                                 element_value, evaluate["reference_answer"], input_netloc, evaluate["netloc"])
                     else:
-                        score = ElementEvaluator.element_value_exact_match(
+                        score = ElementEvaluator6Param.element_value_exact_match(
                             element_value, evaluate["reference_answer"], input_netloc, evaluate["netloc"])
                     # print(score, "element_value_exactly_match",
                     #       element_value, "*", evaluate["reference_answer"])
@@ -193,17 +198,17 @@ async def step_evaluate(page: Page, evaluate_steps=[], input_path=None, element_
                 if input_path is not None and element_value is not None:
                     input_netloc = get_netloc(page.url)
                     if "path" in evaluate.keys():
-                        path_score = ElementEvaluator.path_exact_match(input_path, evaluate["path"], "selector",
+                        path_score = ElementEvaluator6Param.path_exact_match(input_path, evaluate["path"], "selector",
                                                                        await page.content(), input_netloc,
                                                                        evaluate["netloc"])
                         if path_score == 0:
                             # print("Path mismatch in value evaluation")
                             score = 0
                         else:
-                            score = ElementEvaluator.element_value_include_match(
+                            score = ElementEvaluator6Param.element_value_include_match(
                                 element_value, evaluate["reference_answer"], input_netloc, evaluate["netloc"])
                     else:
-                        score = ElementEvaluator.element_value_include_match(
+                        score = ElementEvaluator6Param.element_value_include_match(
                             element_value, evaluate["reference_answer"], input_netloc, evaluate["netloc"])
                     # print(score, "element_value_included_match",
                     #       element_value, "*", evaluate["reference_answer"])
@@ -215,17 +220,17 @@ async def step_evaluate(page: Page, evaluate_steps=[], input_path=None, element_
 
                     if len(element_value) > 0:
                         if "path" in evaluate.keys():
-                            path_score = ElementEvaluator.path_exact_match(input_path, evaluate["path"], "selector",
+                            path_score = ElementEvaluator6Param.path_exact_match(input_path, evaluate["path"], "selector",
                                                                            await page.content(), input_netloc,
                                                                            evaluate["netloc"])
                             if path_score == 0:
                                 # print("Path mismatch in value evaluation")
                                 score = 0
                             else:
-                                score = await ElementEvaluator.element_value_semantic_match(
+                                score = await ElementEvaluator6Param.element_value_semantic_match(
                                     element_value, evaluate["reference_answer"], input_netloc, evaluate["netloc"])
                         else:
-                            score = await ElementEvaluator.element_value_semantic_match(
+                            score = await ElementEvaluator6Param.element_value_semantic_match(
                                 element_value, evaluate["reference_answer"], input_netloc, evaluate["netloc"])
                         # print(score, "element_value_semantic_match",
                         #       element_value, "*", evaluate["reference_answer"])
@@ -295,8 +300,8 @@ async def step_event_evaluate(page: Page, evaluate_steps, env):
                 )
 
             elif match_function == "element_path_exactly_match":
-                score = ElementEvaluator.path_exact_match(
-                    event["selector"], 
+                score = ElementEvaluator4Param.path_exact_match(
+                    event["selector"],
                     evaluate["reference_answer"],
                     evaluate["method"],
                     page
@@ -306,18 +311,18 @@ async def step_event_evaluate(page: Page, evaluate_steps, env):
                 pass
 
             elif match_function == "element_value_exactly_match":
-                score = ElementEvaluator.element_value_exact_match(
+                score = ElementEvaluator4Param.element_value_exact_match(
                     event["target_value"],
                     evaluate["reference_answer"]
                 )
 
             elif match_function == "element_value_included_match":
-                score = ElementEvaluator.element_value_include_match(
+                score = ElementEvaluator4Param.element_value_include_match(
                     event["target_value"], evaluate["reference_answer"]
                 )
 
             elif match_function == "element_value_semantic_match":
-                score = ElementEvaluator.element_value_semantic_match(
+                score = ElementEvaluator4Param.element_value_semantic_match(
                     event["target_value"], evaluate["reference_answer"]
                 )
 
@@ -465,7 +470,10 @@ async def run_task(
     steps_reward_output_token_counts = 0
     steps_input_token_counts = 0
     steps_output_token_counts = 0
-    token_counts_filename = f"token_results/token_counts_{record_time}_{planning_text_model}_{global_reward_text_model}.json"
+    # Sanitize model names for filename (replace / with -)
+    safe_planning_model = planning_text_model.replace('/', '-')
+    safe_reward_model = global_reward_text_model.replace('/', '-')
+    token_counts_filename = f"token_results/token_counts_{record_time}_{safe_planning_model}_{safe_reward_model}.json"
 
     while num_steps < max_steps + additional_steps:
         error_message = ""
@@ -561,7 +569,9 @@ async def run_task(
                         )
 
                 except Exception as ee:
+                    import traceback
                     logger.info(f"Current step evaluate error :{ee}")
+                    logger.info(f"Traceback: {traceback.format_exc()}")
 
                 for evaluate in evaluate_steps:
                     total_step_score += evaluate["score"]
@@ -688,7 +698,7 @@ async def run_task(
 
     # Update token counting
     save_token_count_to_file(token_counts_filename, step_tokens, task_name, global_reward_text_model,
-                             planning_text_model, config["token_pricing"])
+                             planning_text_model, config.get("token_pricing", None))
 
     # ! 3. Task evaluation and scoring
     if task_mode == "batch_tasks":

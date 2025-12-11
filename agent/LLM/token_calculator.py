@@ -62,25 +62,23 @@ def save_token_count_to_file(
     task_name: str,
     global_reward_text_model: str,
     planning_text_model: str,
-    token_pricing: Dict
+    token_pricing: Dict = None
 ) -> None:
     """
     Save token count to a file in JSON format.
-    
+
+    After OpenRouter migration, prefers API-provided cost data over static pricing.
+
     Args:
         filename: Name of the file to save the token count
-        step_tokens: Number of tokens used in steps
+        step_tokens: Number of tokens used in steps (may include API usage_data)
         task_name: Name of the task associated with the token count
         global_reward_text_model: Model used for reward modeling
         planning_text_model: Model used for planning
-        token_pricing: Pricing information for models
+        token_pricing: Optional pricing information for models (legacy, for backward compatibility)
     """
-    if not is_model_supported(planning_text_model) or not is_model_supported(global_reward_text_model):
-        print(
-            f"Message: One or both models ({planning_text_model}, {global_reward_text_model}) "
-            "not in pricing configuration. Skipping token saving."
-        )
-        return
+    # Note: After OpenRouter migration, all models are supported
+    # Token pricing is optional and only used as fallback
 
     # Initialize or load existing data
     try:
@@ -114,59 +112,62 @@ def save_token_count_to_file(
     data["total_output_tokens"] += step_tokens["steps_output_token_counts"]
     data["total_tokens"] += step_tokens["steps_token_counts"]
 
-    # Update planning model costs
-    if planning_text_model in token_pricing["pricing_models"]:
-        if "total_planning_input_token_cost" not in data:
-            data["total_planning_input_token_cost"] = 0
-        if "total_planning_output_token_cost" not in data:
-            data["total_planning_output_token_cost"] = 0
-            
+    # Initialize cost fields if not present
+    if "total_planning_input_token_cost" not in data:
+        data["total_planning_input_token_cost"] = 0
+    if "total_planning_output_token_cost" not in data:
+        data["total_planning_output_token_cost"] = 0
+    if "total_reward_input_token_cost" not in data:
+        data["total_reward_input_token_cost"] = 0
+    if "total_reward_output_token_cost" not in data:
+        data["total_reward_output_token_cost"] = 0
+    if "total_input_token_cost" not in data:
+        data["total_input_token_cost"] = 0
+    if "total_output_token_cost" not in data:
+        data["total_output_token_cost"] = 0
+    if "total_token_cost" not in data:
+        data["total_token_cost"] = 0
+
+    # Try to extract API-provided costs from step_tokens
+    planning_api_cost = step_tokens.get("planning_total_cost", 0.0)
+    reward_api_cost = step_tokens.get("reward_total_cost", 0.0)
+
+    if planning_api_cost > 0 or reward_api_cost > 0:
+        # Use API-provided costs (OpenRouter migration)
+        data["total_planning_cost"] = data.get("total_planning_cost", 0) + planning_api_cost
+        data["total_reward_cost"] = data.get("total_reward_cost", 0) + reward_api_cost
+        data["total_token_cost"] += planning_api_cost + reward_api_cost
+    elif token_pricing and planning_text_model in token_pricing.get("pricing_models", []):
+        # Fallback to legacy pricing calculation
         data["total_planning_input_token_cost"] += (
-            step_tokens["steps_planning_input_token_counts"] * 
+            step_tokens["steps_planning_input_token_counts"] *
             token_pricing[f"{planning_text_model}_input_price"]
         )
         data["total_planning_output_token_cost"] += (
-            step_tokens["steps_planning_output_token_counts"] * 
+            step_tokens["steps_planning_output_token_counts"] *
             token_pricing[f"{planning_text_model}_output_price"]
         )
 
-    # Update reward model costs
-    if global_reward_text_model in token_pricing["pricing_models"]:
-        if "total_reward_input_token_cost" not in data:
-            data["total_reward_input_token_cost"] = 0
-        if "total_reward_output_token_cost" not in data:
-            data["total_reward_output_token_cost"] = 0
-            
-        data["total_reward_input_token_cost"] += (
-            step_tokens["steps_reward_input_token_counts"] * 
-            token_pricing[f"{global_reward_text_model}_input_price"]
-        )
-        data["total_reward_output_token_cost"] += (
-            step_tokens["steps_reward_output_token_counts"] * 
-            token_pricing[f"{global_reward_text_model}_output_price"]
-        )
+        if global_reward_text_model in token_pricing.get("pricing_models", []):
+            data["total_reward_input_token_cost"] += (
+                step_tokens["steps_reward_input_token_counts"] *
+                token_pricing[f"{global_reward_text_model}_input_price"]
+            )
+            data["total_reward_output_token_cost"] += (
+                step_tokens["steps_reward_output_token_counts"] *
+                token_pricing[f"{global_reward_text_model}_output_price"]
+            )
 
-    # Update total costs
-    if (planning_text_model in token_pricing["pricing_models"] and 
-        global_reward_text_model in token_pricing["pricing_models"]):
-        
-        if "total_input_token_cost" not in data:
-            data["total_input_token_cost"] = 0
-        if "total_output_token_cost" not in data:
-            data["total_output_token_cost"] = 0
-        if "total_token_cost" not in data:
-            data["total_token_cost"] = 0
-            
         data["total_input_token_cost"] += (
-            data["total_planning_input_token_cost"] + 
+            data["total_planning_input_token_cost"] +
             data["total_reward_input_token_cost"]
         )
         data["total_output_token_cost"] += (
-            data["total_planning_output_token_cost"] + 
+            data["total_planning_output_token_cost"] +
             data["total_reward_output_token_cost"]
         )
         data["total_token_cost"] += (
-            data["total_input_token_cost"] + 
+            data["total_input_token_cost"] +
             data["total_output_token_cost"]
         )
 

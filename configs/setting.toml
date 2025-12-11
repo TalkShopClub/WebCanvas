@@ -3,19 +3,12 @@ task_mode = "batch_tasks"    # single_task or batch_tasks
 max_time_step = 25           # For all tasks, set the maximum step length
 
 [model]
-json_model_response = false      # Whether to require a model to strictly output json format, currently only support OPENAI models.
-json_models = ["gpt-4-turbo",
-                   "gpt-4-turbo-2024-04-09",
-                   "gpt-4-0125-preview",
-                   "gpt-4-1106-preview",
-                   "gpt-3.5-turbo",
-                   "gpt-3.5-turbo-0125",
-                   "gpt-4o-2024-05-13",
-                   "gpt-4o-mini-2024-07-18"]
+json_model_response = false      # Whether to require a model to strictly output json format
+# json_models list removed - OpenRouter supports JSON mode with graceful degradation for all models
 
 
 [steps]
-interaction_mode = true             #  Whether human control of task execution status is required
+interaction_mode = false             #  Whether human control of task execution status is required
 single_task_action_step = 10     
 batch_tasks_max_action_step = 10
 batch_tasks_condition_step_increase = 5
@@ -28,6 +21,9 @@ out_file_path = "./batch_tasks_results/example"   # YOUR OUT FILE PATH
 [conditions]
 URL = ["error"]
 
+# DEPRECATED: Legacy token pricing - kept for backward compatibility only
+# After OpenRouter migration, actual costs are provided via API responses
+# This section is optional and only used if API cost data is unavailable
 [token_pricing]
 pricing_models = [
     "gpt-4o",

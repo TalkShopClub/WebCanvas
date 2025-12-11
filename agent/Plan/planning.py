@@ -27,12 +27,13 @@ class DomMode(InteractionMode):
         logger.info(
             f"\033[32mDOM_based_planning_request:\n{planning_request}\033[0m\n")
         logger.info(f"planning_text_model: {self.text_model.model}")
-        planning_response, error_message = await self.text_model.request(planning_request)
-        # if "gpt" in self.text_model.model:
-        #     output_token_count = future_answer_result.usage.completion_tokens
-        #     input_token_count = future_answer_result.usage.prompt_tokens
-        input_token_count = calculation_of_token(planning_request, model=self.text_model.model)
-        output_token_count = calculation_of_token(planning_response, model=self.text_model.model)
+
+        # OpenRouter returns (content, error, usage_data)
+        planning_response, error_message, usage_data = await self.text_model.request(planning_request)
+
+        # Extract token counts from API usage data
+        input_token_count = usage_data.get("prompt_tokens", 0)
+        output_token_count = usage_data.get("completion_tokens", 0)
         planning_token_count = [input_token_count, output_token_count]
 
         return planning_response, error_message, None, None, planning_token_count
@@ -47,7 +48,7 @@ class DomVDescMode(InteractionMode):
             vision_desc_request = VisionDisc2PromptConstructor().construct(
                 user_request, observation_VforD)  # vision description request with user_request
             # vision_desc_request = VisionDisc1PromptConstructor().construct(observation_VforD)
-            vision_desc_response, error_message = await self.visual_model.request(vision_desc_request)
+            vision_desc_response, error_message, _ = await self.visual_model.request(vision_desc_request)
         else:
             vision_desc_response = ""
         print(f"\033[36mvision_disc_response:\n{vision_desc_response}")  # blue
@@ -56,8 +57,14 @@ class DomVDescMode(InteractionMode):
         print(
             f"\033[35mplanning_request:\n{print_limited_json(planning_request, limit=10000)}")
         print("\033[0m")
-        planning_response, error_message = await self.text_model.request(planning_request)
-        return planning_response, error_message, None, None
+        planning_response, error_message, usage_data = await self.text_model.request(planning_request)
+
+        # Extract token counts from API usage data
+        input_token_count = usage_data.get("prompt_tokens", 0)
+        output_token_count = usage_data.get("completion_tokens", 0)
+        planning_token_count = [input_token_count, output_token_count]
+
+        return planning_response, error_message, None, None, planning_token_count
 
 
 class VisionToDomMode(InteractionMode):
@@ -69,7 +76,7 @@ class VisionToDomMode(InteractionMode):
             user_request, previous_trace, observation_VforD, feedback, status_description)
         max_retries = 3
         for attempt in range(max_retries):
-            vision_act_response, error_message = await self.visual_model.request(vision_act_request)
+            vision_act_response, error_message, _ = await self.visual_model.request(vision_act_request)
             # Blue output
             print(f"\033[36mvision_act_response:\n{vision_act_response}")
             print("\033[0m")  # Reset color
@@ -111,7 +118,7 @@ class VisionToDomMode(InteractionMode):
                 print("\033[0m")
 
                 # Send the request and wait for the response
-                planning_response_dom, error_message = await self.text_model.request(planning_request)
+                planning_response_dom, error_message, _ = await self.text_model.request(planning_request)
                 print(
                     f"\033[34mVisionToDomplanning_response:\n{planning_response_dom}")
                 print("\033[0m")
@@ -149,8 +156,14 @@ class DVMode(InteractionMode):
         print(
             f"\033[32mplanning_request:\n{print_limited_json(planning_request, limit=1000)}")
         print("\033[0m")
-        planning_response, error_message = await self.visual_model.request(planning_request)
-        return planning_response, error_message, None, None
+        planning_response, error_message, usage_data = await self.visual_model.request(planning_request)
+
+        # Extract token counts from API usage data
+        input_token_count = usage_data.get("prompt_tokens", 0)
+        output_token_count = usage_data.get("completion_tokens", 0)
+        planning_token_count = [input_token_count, output_token_count]
+
+        return planning_response, error_message, None, None, planning_token_count
 
 
 class VisionMode(InteractionMode):
@@ -163,8 +176,14 @@ class VisionMode(InteractionMode):
         print(f"\033[32m{planning_request}")  # Green color
         print("\033[0m")
         logger.info("\033[32m%s\033[0m", planning_request)
-        planning_response, error_message = await self.visual_model.request(planning_request)
-        return planning_response, error_message, None, None
+        planning_response, error_message, usage_data = await self.visual_model.request(planning_request)
+
+        # Extract token counts from API usage data
+        input_token_count = usage_data.get("prompt_tokens", 0)
+        output_token_count = usage_data.get("completion_tokens", 0)
+        planning_token_count = [input_token_count, output_token_count]
+
+        return planning_response, error_message, None, None, planning_token_count
 
 
 class Planning:
@@ -182,14 +201,14 @@ class Planning:
         status_description
     ):
 
-        gpt35 = GPTGenerator(model="gpt-3.5-turbo")
-        gpt4v = GPTGenerator(model="gpt-4-turbo")
+        # Use OpenRouter for all models
+        gpt35 = create_llm_instance(model="openai/gpt-3.5-turbo")
+        gpt4v = create_llm_instance(model="openai/gpt-4-turbo")
 
-        all_json_models = config["model"]["json_models"]
         is_json_response = config["model"]["json_model_response"]
 
         llm_planning_text = create_llm_instance(
-            text_model_name, is_json_response, all_json_models)
+            text_model_name, is_json_response)
 
         modes = {
             "dom": DomMode(text_model=llm_planning_text),
@@ -221,7 +240,7 @@ class Planning:
             JudgeSearchbarRequest = JudgeSearchbarPromptConstructor().construct(
                 input_element=observation, planning_response_action=planning_response_action)
             try:
-                Judge_response, error_message = await gpt35.request(JudgeSearchbarRequest)
+                Judge_response, error_message, _ = await gpt35.request(JudgeSearchbarRequest)
                 if Judge_response.lower() == "yes":
                     planning_response_action['action'] = "fill_search"
             except:
