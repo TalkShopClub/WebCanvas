@@ -93,14 +93,26 @@ def score_rate(score):
 
 
 def parse_step_reward(dict_str):
+    # Try parsing as JSON first (for structured output)
+    try:
+        import json5
+        score_description = json5.loads(dict_str)
+        if isinstance(score_description, dict) and 'score' in score_description:
+            return score_description
+    except:
+        pass
+
+    # Fall back to regex parsing
     score_description = {}
     score_match = re.search(r"'score':\s*(.+?)\s*,\s*'description'", dict_str)
     description_match = re.search(r"'description':\s*(.+?)\s*}", dict_str)
     score = score_match.group(1) if score_match else None
-    score = score.replace("\\", "").replace("\"", "").replace("\'", "")
+    if score is not None:
+        score = score.replace("\\", "").replace("\"", "").replace("\'", "")
     description = description_match.group(1) if description_match else None
-    description = description.replace(
-        "\\", "").replace("\"", "").replace("\'", "")
+    if description is not None:
+        description = description.replace(
+            "\\", "").replace("\"", "").replace("\'", "")
     score_description = {"score": score, "description": description}
     return score_description
 

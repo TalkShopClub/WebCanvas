@@ -5,36 +5,62 @@ import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from sanic.log import logger
 from openai import AsyncOpenAI
-from .schemas import AgentActionSchema, RewardSchema
+from .schemas import AgentActionSchema, RewardSchema, StepRewardSchema, SemanticMatchSchema
 
 
 class OpenRouterGenerator:
     """
-    Unified LLM generator using OpenRouter API.
+    Unified LLM generator using OpenRouter API or custom OpenAI-compatible endpoints.
     Supports any model available on OpenRouter with smart JSON mode degradation.
+    Can also work with custom endpoints like vLLM.
     """
 
-    def __init__(self, model=None, json_mode=False):
+    def __init__(self, model=None, json_mode=False, schema=None, use_custom_endpoint=False):
         self.model = model
         self.json_mode = json_mode
         self.json_mode_strategy = None  # Will be set during first request
-        self.client = AsyncOpenAI(
-            api_key=os.environ.get("OPENROUTER_API_KEY"),
-            base_url="https://openrouter.ai/api/v1"
-        )
+        self.schema = schema or AgentActionSchema  # Default to AgentActionSchema for backward compatibility
 
-    async def request(self, messages: list = None, max_tokens: int = 500, temperature: float = 0.7) -> tuple:
+        # Check if using custom endpoint (e.g., vLLM on RunPod)
+        if use_custom_endpoint:
+            custom_api_key = os.environ.get("CUSTOM_LLM_API_KEY")
+            custom_base_url = os.environ.get("CUSTOM_LLM_BASE_URL")
+
+            if not custom_api_key or not custom_base_url:
+                raise ValueError(
+                    "Custom endpoint enabled but CUSTOM_LLM_API_KEY or CUSTOM_LLM_BASE_URL not set. "
+                    "Please set these environment variables."
+                )
+
+            logger.info(f"Using custom LLM endpoint: {custom_base_url}")
+            self.client = AsyncOpenAI(
+                api_key=custom_api_key,
+                base_url=custom_base_url
+            )
+            self.is_custom_endpoint = True
+        else:
+            # Use OpenRouter
+            self.client = AsyncOpenAI(
+                api_key=os.environ.get("OPENROUTER_API_KEY"),
+                base_url="https://openrouter.ai/api/v1"
+            )
+            self.is_custom_endpoint = False
+
+    async def request(self, messages: list = None, max_tokens: int = None, temperature: float = None, return_parsed: bool = True) -> tuple:
         """
         Make a request to OpenRouter API with retry logic.
 
         Args:
             messages: List of message dicts with 'role' and 'content'
-            max_tokens: Maximum tokens to generate
-            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate (None = use OpenRouter's default)
+            temperature: Sampling temperature (None = use provider's recommended value)
+            return_parsed: If True and schema is set, parse response into Pydantic object
 
         Returns:
             Tuple of (response_content, error_message, usage_data)
-            usage_data dict contains: prompt_tokens, completion_tokens, total_tokens, total_cost
+            - If return_parsed=True and schema is set: response_content is parsed Pydantic object
+            - Otherwise: response_content is JSON string
+            usage_data dict contains: prompt_tokens, completion_tokens, total_tokens, cost
         """
         max_retries = 3
         for attempt in range(max_retries):
@@ -51,6 +77,16 @@ class OpenRouterGenerator:
                 # Extract usage data
                 usage_data = self._extract_usage(response)
 
+                # Parse into Pydantic object if requested and schema is available
+                if return_parsed and self.schema and self.json_mode:
+                    try:
+                        parsed_content = self.schema.model_validate_json(content)
+                        return parsed_content, "", usage_data
+                    except Exception as parse_error:
+                        logger.warning(f"Failed to parse response into {self.schema.__name__}: {parse_error}")
+                        # Fall back to returning raw string
+                        return content, "", usage_data
+
                 return content, "", usage_data
 
             except Exception as e:
@@ -61,12 +97,12 @@ class OpenRouterGenerator:
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
                         "total_tokens": 0,
-                        "total_cost": 0.0
+                        "cost": 0.0
                     }
                 # Exponential backoff
                 await asyncio.sleep(2 ** attempt)
 
-    async def chat(self, messages, max_tokens=500, temperature=0.7):
+    async def chat(self, messages, max_tokens=None, temperature=None):
         """
         Execute the actual API call with JSON mode handling.
 
@@ -122,30 +158,33 @@ class OpenRouterGenerator:
         """
         Request with structured JSON schema (most strict).
 
-        Uses AgentActionSchema as the default schema, which matches the planning/action
-        format defined in agent/Prompt/base_prompts.py.
+        Uses the schema specified in __init__ (defaults to AgentActionSchema).
         """
         # Ensure there's a JSON instruction in messages
         messages = self._prepare_messages_for_json_mode(messages)
 
-        # Use AgentActionSchema as the default (covers most use cases)
-        # This matches the JSON structure defined in the prompts
-        schema = AgentActionSchema.model_json_schema()
+        # Use the schema specified during initialization
+        schema = self.schema.model_json_schema()
+        schema_name = self.schema.__name__.lower().replace("schema", "")
 
         data = {
             'model': self.model,
-            'max_tokens': max_tokens,
-            'temperature': temperature,
             'messages': messages,
             'response_format': {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "agent_action",
+                    "name": schema_name,
                     "strict": True,
                     "schema": schema
                 }
             }
         }
+
+        # Only add max_tokens and temperature if explicitly provided
+        if max_tokens is not None:
+            data['max_tokens'] = max_tokens
+        if temperature is not None:
+            data['temperature'] = temperature
 
         # Add usage tracking
         data['extra_body'] = {
@@ -164,11 +203,15 @@ class OpenRouterGenerator:
 
         data = {
             'model': self.model,
-            'max_tokens': max_tokens,
-            'temperature': temperature,
             'messages': messages,
             'response_format': {"type": "json_object"}
         }
+
+        # Only add max_tokens and temperature if explicitly provided
+        if max_tokens is not None:
+            data['max_tokens'] = max_tokens
+        if temperature is not None:
+            data['temperature'] = temperature
 
         # Add usage tracking
         data['extra_body'] = {
@@ -189,10 +232,14 @@ class OpenRouterGenerator:
         """
         data = {
             'model': self.model,
-            'max_tokens': max_tokens,
-            'temperature': temperature,
             'messages': messages  # Don't modify messages - prompts already ask for JSON
         }
+
+        # Only add max_tokens and temperature if explicitly provided
+        if max_tokens is not None:
+            data['max_tokens'] = max_tokens
+        if temperature is not None:
+            data['temperature'] = temperature
 
         # Add usage tracking
         data['extra_body'] = {
@@ -208,10 +255,14 @@ class OpenRouterGenerator:
         """Plain text request without JSON mode."""
         data = {
             'model': self.model,
-            'max_tokens': max_tokens,
-            'temperature': temperature,
             'messages': messages
         }
+
+        # Only add max_tokens and temperature if explicitly provided
+        if max_tokens is not None:
+            data['max_tokens'] = max_tokens
+        if temperature is not None:
+            data['temperature'] = temperature
 
         # Add usage tracking
         data['extra_body'] = {
@@ -248,7 +299,7 @@ class OpenRouterGenerator:
         Extract token usage and cost data from OpenRouter response.
 
         Returns:
-            Dict with prompt_tokens, completion_tokens, total_tokens, total_cost
+            Dict with prompt_tokens, completion_tokens, total_tokens, cost
         """
         if hasattr(response, 'usage'):
             usage = response.usage
@@ -256,9 +307,7 @@ class OpenRouterGenerator:
                 "prompt_tokens": getattr(usage, 'prompt_tokens', 0),
                 "completion_tokens": getattr(usage, 'completion_tokens', 0),
                 "total_tokens": getattr(usage, 'total_tokens', 0),
-                # OpenRouter may provide cost in different fields
-                # Check common field names
-                "total_cost": getattr(usage, 'cost', 0.0)
+                "cost": getattr(usage, 'cost', 0.0)
             }
 
         # No usage data available
@@ -267,5 +316,5 @@ class OpenRouterGenerator:
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
-            "total_cost": 0.0
+            "cost": 0.0
         }

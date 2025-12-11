@@ -3,7 +3,7 @@ task_mode = "batch_tasks"    # single_task or batch_tasks
 max_time_step = 25           # For all tasks, set the maximum step length
 
 [model]
-json_model_response = false      # Whether to require a model to strictly output json format
+json_model_response = true      # Whether to require a model to strictly output json format
 # json_models list removed - OpenRouter supports JSON mode with graceful degradation for all models
 
 

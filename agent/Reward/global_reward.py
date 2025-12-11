@@ -1,6 +1,7 @@
 from ..Utils.utils import print_info, print_limited_json
 from agent.Prompt import *
 from agent.LLM import *
+from agent.LLM.schemas import RewardSchema
 from agent.Plan.action import *
 import time
 import json5
@@ -17,6 +18,7 @@ class InteractionMode:
         reward_response = None
         reward_input_token_count = 0
         reward_output_token_count = 0
+        reward_total_cost = 0.0
         reward_token_count = [reward_input_token_count, reward_output_token_count]
         if len(previous_trace) > 0:
             stringfy_thought_and_action_output = PlanningPromptConstructor().stringfy_thought_and_action(
@@ -63,15 +65,24 @@ class InteractionMode:
                     else:
                         print_info(
                             f"using gpt_global_reward_text: {self.text_model.model}", "purple")
-                        response_str, error_message, usage_data = await self.text_model.request(reward_request)
-                    reward_response = ActionParser().extract_status_and_description(
-                        response_str)
+                        response_obj, error_message, usage_data = await self.text_model.request(reward_request)
 
-                    # Extract token counts from API usage data
+                    # If we got a parsed Pydantic object, convert to dict
+                    # Otherwise use ActionParser for fallback parsing
+                    if isinstance(response_obj, RewardSchema):
+                        reward_response = response_obj.model_dump()
+                    elif isinstance(response_obj, str):
+                        reward_response = ActionParser().extract_status_and_description(response_obj)
+                    else:
+                        reward_response = response_obj
+
+                    # Extract token counts and cost from API usage data
                     input_token_count = usage_data.get("prompt_tokens", 0)
                     output_token_count = usage_data.get("completion_tokens", 0)
+                    cost = usage_data.get("cost", 0.0)
                     reward_input_token_count += input_token_count
                     reward_output_token_count += output_token_count
+                    reward_total_cost += cost
                     reward_token_count = [reward_input_token_count, reward_output_token_count]
                     break
                 except Exception as e:
@@ -85,7 +96,7 @@ class InteractionMode:
                 f"\033[34mGlobal_response_str:\n{response_str}\033[34m")
         else:
             response_str = ""
-        return response_str, reward_response, reward_token_count
+        return response_str, reward_response, reward_token_count, reward_total_cost
 
 
 class GlobalReward:
@@ -110,12 +121,12 @@ class GlobalReward:
         is_json_response = config["model"]["json_model_response"]
 
         llm_global_reward_text = create_llm_instance(
-            model_name, is_json_response)
+            model_name, is_json_response, schema=RewardSchema)
         
-        _, reward_response, reward_token_count = await InteractionMode(text_model=llm_global_reward_text, visual_model=gpt4v).get_global_reward(
+        _, reward_response, reward_token_count, reward_cost = await InteractionMode(text_model=llm_global_reward_text, visual_model=gpt4v).get_global_reward(
             user_request=user_request, previous_trace=previous_trace, observation=observation,
             current_info=current_info, ground_truth_mode=ground_truth_mode, global_reward_mode=global_reward_mode,
             ground_truth_data=ground_truth_data, task_name_id=task_name_id)
         description = reward_response.get(
             "description") if reward_response and reward_response.get("description") else ""
-        return reward_response, description, reward_token_count
+        return reward_response, description, reward_token_count, reward_cost

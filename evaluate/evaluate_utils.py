@@ -18,6 +18,7 @@ from logs import logger
 from agent.LLM.token_calculator import save_token_count_to_file
 from urllib.parse import urlparse
 import json 
+import traceback
 
 
 def read_file(file_path: str = "./data/example/example_130.json") -> List[List]:
@@ -443,6 +444,7 @@ async def run_task(
     # Configuration related to controlling the length of steps
     conditions = config["conditions"]
     increase_step = config["steps"]["batch_tasks_condition_step_increase"]
+    max_time_step = config["basic"]["max_time_step"]
     encountered_errors = set()
     current_info = {"URL": env.page.url}
     num_steps = 0
@@ -461,8 +463,9 @@ async def run_task(
     task_result["reference_task_length"] = reference_task_length
     steps_list = []
 
-    # Store the token counts of each step
+    # Store the token counts and costs of each step
     steps_token_counts = 0
+    steps_total_cost = 0.0
     step_tokens = {"steps_tokens_record": [], "steps_token_counts": steps_token_counts}
     steps_planning_input_token_counts = 0
     steps_reward_input_token_counts = 0
@@ -470,6 +473,8 @@ async def run_task(
     steps_reward_output_token_counts = 0
     steps_input_token_counts = 0
     steps_output_token_counts = 0
+    steps_planning_cost = 0.0
+    steps_reward_cost = 0.0
     # Sanitize model names for filename (replace / with -)
     safe_planning_model = planning_text_model.replace('/', '-')
     safe_reward_model = global_reward_text_model.replace('/', '-')
@@ -482,13 +487,15 @@ async def run_task(
         status_description = ""
         planning_input_token_count = 0
         planning_output_token_count = 0
+        planning_cost = 0.0
         reward_token_count = [0, 0]
+        reward_cost = 0.0
 
         logger.info(
             "**🤖 The agent is in the process of starting planning 🤖**")
 
         if global_reward_mode != 'no_global_reward' and len(previous_trace) > 0:
-            step_reward, status_description, reward_token_count = await GlobalReward.evaluate(
+            step_reward, status_description, reward_token_count, reward_cost = await GlobalReward.evaluate(
                 config=config,
                 model_name=global_reward_text_model,
                 user_request=task_name,
@@ -527,6 +534,7 @@ async def run_task(
         if out_put:
             planning_input_token_count += out_put.get("planning_token_count", [0, 0])[0]
             planning_output_token_count += out_put.get("planning_token_count", [0, 0])[1]
+            planning_cost += out_put.get("planning_cost", 0.0)
             each_step_dict = {}
             each_step_dict["step_index"] = step_index
             each_step_dict["dict_result"] = out_put
@@ -649,7 +657,7 @@ async def run_task(
             additional_steps += step_increase
             steps_list.append(each_step_dict)
             step_index += 1
-            if num_steps >= 25 or task_global_status == "finished" or task_finished:
+            if num_steps >= max_time_step or task_global_status == "finished" or task_finished:
                 break
         num_steps += 1
         if interaction_mode:
@@ -666,35 +674,45 @@ async def run_task(
         step_input_token_count = planning_input_token_count + reward_token_count[0]
         step_output_token_count = planning_output_token_count + reward_token_count[1]
         step_token_count = planning_token_count_number + reward_token_count_number
+        step_cost = planning_cost + reward_cost
         single_step_tokens = {
             "planning_input_token_count": planning_input_token_count,
             "planning_output_token_count": planning_output_token_count,
             "planning_token_count": planning_token_count_number,
+            "planning_cost": planning_cost,
             "reward_input_token_count": reward_token_count[0],
             "reward_output_token_count": reward_token_count[1],
             "reward_token_count": reward_token_count_number,
+            "reward_cost": reward_cost,
             "input_token_count": step_input_token_count,
             "output_token_count": step_output_token_count,
-            "token_count": step_token_count
+            "token_count": step_token_count,
+            "step_cost": step_cost
         }
 
         step_tokens["steps_tokens_record"].append(single_step_tokens)
 
         steps_planning_input_token_counts += planning_input_token_count
         steps_planning_output_token_counts += planning_output_token_count
+        steps_planning_cost += planning_cost
         steps_reward_input_token_counts += reward_token_count[0]
         steps_reward_output_token_counts += reward_token_count[1]
+        steps_reward_cost += reward_cost
         steps_input_token_counts += step_input_token_count
         steps_output_token_counts += step_output_token_count
         steps_token_counts += step_token_count
+        steps_total_cost += step_cost
 
     step_tokens["steps_planning_input_token_counts"] = steps_planning_input_token_counts
     step_tokens["steps_planning_output_token_counts"] = steps_planning_output_token_counts
+    step_tokens["steps_planning_cost"] = steps_planning_cost
     step_tokens["steps_reward_input_token_counts"] = steps_reward_input_token_counts
     step_tokens["steps_reward_output_token_counts"] = steps_reward_output_token_counts
+    step_tokens["steps_reward_cost"] = steps_reward_cost
     step_tokens["steps_input_token_counts"] = steps_input_token_counts
     step_tokens["steps_output_token_counts"] = steps_output_token_counts
     step_tokens["steps_token_counts"] = steps_token_counts
+    step_tokens["steps_total_cost"] = steps_total_cost
 
     # Update token counting
     save_token_count_to_file(token_counts_filename, step_tokens, task_name, global_reward_text_model,
@@ -738,6 +756,20 @@ async def run_task(
         task_result["step_list"] = steps_list
         task_result["evaluate_steps"] = reference_evaluate_steps
 
+        # Add usage/cost information
+        task_result["usage"] = {
+            "planning_input_tokens": steps_planning_input_token_counts,
+            "planning_output_tokens": steps_planning_output_token_counts,
+            "planning_cost": steps_planning_cost,
+            "reward_input_tokens": steps_reward_input_token_counts,
+            "reward_output_tokens": steps_reward_output_token_counts,
+            "reward_cost": steps_reward_cost,
+            "total_input_tokens": steps_input_token_counts,
+            "total_output_tokens": steps_output_token_counts,
+            "total_tokens": steps_token_counts,
+            "total_cost": steps_total_cost
+        }
+
         json_result_folder = write_result_file_path
         if not os.path.exists(json_result_folder):
             os.makedirs(json_result_folder)
@@ -745,4 +777,12 @@ async def run_task(
             json_result_folder, str(task_index) + "_" + str(task_result["id"]) + ".json")
         logger.info(f"Write results to json file: {json_out_file_path}")
         with open(json_out_file_path, 'w') as json_file:
-            json.dump(task_result, json_file)
+            json.dump(task_result, json_file, indent=2)
+
+        # Print task cost summary
+        logger.info(f"Task Cost Summary: ")
+        logger.info(f"Planning cost: ${steps_planning_cost:.6f}")
+        logger.info(f"Reward cost: ${steps_reward_cost:.6f}")
+        logger.info(f"Total task cost: ${steps_total_cost:.6f}")
+
+        return steps_total_cost

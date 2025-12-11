@@ -31,12 +31,13 @@ class DomMode(InteractionMode):
         # OpenRouter returns (content, error, usage_data)
         planning_response, error_message, usage_data = await self.text_model.request(planning_request)
 
-        # Extract token counts from API usage data
+        # Extract token counts and cost from API usage data
         input_token_count = usage_data.get("prompt_tokens", 0)
         output_token_count = usage_data.get("completion_tokens", 0)
+        planning_cost = usage_data.get("cost", 0.0)
         planning_token_count = [input_token_count, output_token_count]
 
-        return planning_response, error_message, None, None, planning_token_count
+        return planning_response, error_message, None, None, planning_token_count, planning_cost
 
 
 class DomVDescMode(InteractionMode):
@@ -59,12 +60,13 @@ class DomVDescMode(InteractionMode):
         print("\033[0m")
         planning_response, error_message, usage_data = await self.text_model.request(planning_request)
 
-        # Extract token counts from API usage data
+        # Extract token counts and cost from API usage data
         input_token_count = usage_data.get("prompt_tokens", 0)
         output_token_count = usage_data.get("completion_tokens", 0)
+        planning_cost = usage_data.get("cost", 0.0)
         planning_token_count = [input_token_count, output_token_count]
 
-        return planning_response, error_message, None, None, planning_token_count
+        return planning_response, error_message, None, None, planning_token_count, planning_cost
 
 
 class VisionToDomMode(InteractionMode):
@@ -158,12 +160,13 @@ class DVMode(InteractionMode):
         print("\033[0m")
         planning_response, error_message, usage_data = await self.visual_model.request(planning_request)
 
-        # Extract token counts from API usage data
+        # Extract token counts and cost from API usage data
         input_token_count = usage_data.get("prompt_tokens", 0)
         output_token_count = usage_data.get("completion_tokens", 0)
+        planning_cost = usage_data.get("cost", 0.0)
         planning_token_count = [input_token_count, output_token_count]
 
-        return planning_response, error_message, None, None, planning_token_count
+        return planning_response, error_message, None, None, planning_token_count, planning_cost
 
 
 class VisionMode(InteractionMode):
@@ -178,12 +181,13 @@ class VisionMode(InteractionMode):
         logger.info("\033[32m%s\033[0m", planning_request)
         planning_response, error_message, usage_data = await self.visual_model.request(planning_request)
 
-        # Extract token counts from API usage data
+        # Extract token counts and cost from API usage data
         input_token_count = usage_data.get("prompt_tokens", 0)
         output_token_count = usage_data.get("completion_tokens", 0)
+        planning_cost = usage_data.get("cost", 0.0)
         planning_token_count = [input_token_count, output_token_count]
 
-        return planning_response, error_message, None, None, planning_token_count
+        return planning_response, error_message, None, None, planning_token_count, planning_cost
 
 
 class Planning:
@@ -206,9 +210,10 @@ class Planning:
         gpt4v = create_llm_instance(model="openai/gpt-4-turbo")
 
         is_json_response = config["model"]["json_model_response"]
+        use_custom = config["model"].get("custom_model", False)
 
         llm_planning_text = create_llm_instance(
-            text_model_name, is_json_response)
+            text_model_name, is_json_response, use_custom_endpoint=use_custom)
 
         modes = {
             "dom": DomMode(text_model=llm_planning_text),
@@ -219,13 +224,21 @@ class Planning:
         }
 
         # planning_response_thought, planning_response_action
-        planning_response, error_message, planning_response_thought, planning_response_action, planning_token_count = await modes[mode].execute(
+        result = await modes[mode].execute(
             status_description=status_description,
             user_request=user_request,
             previous_trace=previous_trace,
             observation=observation,
             feedback=feedback,
             observation_VforD=observation_VforD)
+
+        # Unpack results - VisionToDomMode returns 4 values, others return 6
+        if len(result) == 4:
+            planning_response, error_message, planning_response_thought, planning_response_action = result
+            planning_token_count = [0, 0]
+            planning_cost = 0.0
+        else:
+            planning_response, error_message, planning_response_thought, planning_response_action, planning_token_count, planning_cost = result
 
         logger.info(f"\033[34mPlanning_Response:\n{planning_response}\033[0m")
         if mode != "vision_to_dom":
@@ -274,5 +287,6 @@ class Planning:
         dict_to_write['description'] = planning_response_action['description']
         dict_to_write['error_message'] = error_message
         dict_to_write['planning_token_count'] = planning_token_count
+        dict_to_write['planning_cost'] = planning_cost
 
         return dict_to_write

@@ -15,7 +15,7 @@ class GPTGenerator:
         self.model = model
         self.client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    async def request(self, messages: list = None, max_tokens: int = 500, temperature: float = 0.7) -> (str, str):
+    async def request(self, messages: list = None, max_tokens: int = None, temperature: float = None) -> (str, str):
         try:
             if "gpt-3.5" in self.model:
                 messages = truncate_messages_based_on_estimated_tokens(messages, max_tokens=16385)
@@ -42,7 +42,7 @@ class GPTGenerator:
             logger.error(f"Error in GPTGenerator.request: {e}")
             return "", str(e)
 
-    async def chat(self, messages, max_tokens=500, temperature=0.7):
+    async def chat(self, messages, max_tokens=None, temperature=None):
         loop = asyncio.get_event_loop()
         if "o1" in self.model:
             data = {
@@ -52,10 +52,13 @@ class GPTGenerator:
         else:
             data = {
                 'model': self.model,
-                'max_tokens': max_tokens,
-            'temperature': temperature,
-            'messages': messages,
-        }
+                'messages': messages,
+            }
+            # Only add max_tokens and temperature if explicitly provided
+            if max_tokens is not None:
+                data['max_tokens'] = max_tokens
+            if temperature is not None:
+                data['temperature'] = temperature
         if hasattr(self, 'response_format'):
             data['response_format'] = self.response_format
 
@@ -79,7 +82,7 @@ class JSONModeMixin(GPTGenerator):
             messages.insert(0, {"role": "system", "content": "You are a helpful assistant designed to output json."})
         return messages
 
-    async def request(self, messages: list = None, max_tokens: int = 500, temperature: float = 0.7) -> (str, str):
+    async def request(self, messages: list = None, max_tokens: int = None, temperature: float = None) -> (str, str):
         messages = self.prepare_messages_for_json_mode(messages)  # Prepare messages for JSON mode
         return await super().request(messages, max_tokens, temperature)
 

@@ -38,7 +38,7 @@ class AgentActionSchema(BaseModel):
 class RewardSchema(BaseModel):
     """
     Schema for reward/evaluation responses.
-    Used in global_reward and current_reward modes.
+    Used in global_reward modes.
 
     Matches the schema defined in base_prompts.py lines 135-141.
     """
@@ -57,4 +57,32 @@ class RewardSchema(BaseModel):
     description: str = Field(
         ...,
         description="Description of current completion status and future plan"
+    )
+
+
+class StepRewardSchema(BaseModel):
+    """
+    Schema for step/current reward responses.
+    Used in current_reward evaluation.
+
+    Matches the schema defined in base_prompts.py lines 239-253.
+    """
+    score: str = Field(
+        ...,
+        description="Score from [1, 3, 7, 9, 10] representing step quality"
+    )
+    description: str = Field(
+        ...,
+        description="Reasoning for the score and suggestions for improvement"
+    )
+
+
+class SemanticMatchSchema(BaseModel):
+    """
+    Schema for semantic matching score responses.
+    Used in step evaluation to compare actual output with expected output.
+    """
+    score: float = Field(
+        ...,
+        description="Similarity score between 0.0 and 1.0, where 1.0 means identical and 0.0 means completely different"
     )

@@ -204,21 +204,32 @@ class MatchFunction:
 
     @staticmethod
     async def semantic_match(input_answer, semantic_method) -> float:
-        # GPT35 = GPTGenerator(model="gpt-3.5-turbo")
+        from agent.LLM.schemas import SemanticMatchSchema
+
         semantic_request = SemanticMatchPromptConstructor(
         ).construct(input_answer, semantic_method)
         score = None
         for i in range(3):
             try:
-                # response, _ = await GPT35.request(semantic_request)
                 response, _ = await semantic_match_llm_request(semantic_request)
-                score = re.findall("```(.*?)```", response, re.S)[0]
-                score = eval(score)
+
+                # Handle structured output (Pydantic object)
+                if isinstance(response, SemanticMatchSchema):
+                    score = response.score
+                # Handle string response (fallback to regex parsing)
+                elif isinstance(response, str):
+                    score_str = re.findall("```(.*?)```", response, re.S)[0]
+                    score = eval(score_str)
+                else:
+                    # Handle dict response
+                    score = response.get('score') if isinstance(response, dict) else None
+
                 # Limit the score between 0 and 1
-                score = max(0, min(1, score))
-                if score != None:
+                if score is not None:
+                    score = max(0, min(1, float(score)))
                     break
-            except:
+            except Exception as e:
+                logger.warning(f"Semantic match attempt {i+1} failed: {e}")
                 score = None
         if score == None:
             score = 0

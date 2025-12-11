@@ -33,6 +33,7 @@ class ExperimentConfig:
     write_result_file_path: str
     record_time: str
     file: list
+    custom_model: bool = False
 
 
 def validate_config(config, observation_mode, global_reward_mode, observation_model, global_reward_model):
@@ -65,7 +66,8 @@ def validate_config(config, observation_mode, global_reward_mode, observation_mo
 
 def get_task_range(task_mode, file, raw_data_index):
     if task_mode == "batch_tasks":
-        if raw_data_index != -1:
+        # Convert string to int for comparison, handle both string "-1" and int -1
+        if str(raw_data_index) != "-1":
             re_result = re.split(r'\s|,', raw_data_index)
             raw_data_start_index = int(re_result[0])
             raw_data_end_index = int(re_result[-1]) + 1
@@ -118,6 +120,7 @@ def create_html_environment(mode):
 
 
 async def run_experiment(task_range, experiment_config):
+    cumulative_cost = 0.0
     for task_index in task_range:
         task_uuid = None
         if experiment_config.config['basic']['task_mode'] == "batch_tasks":
@@ -144,7 +147,7 @@ async def run_experiment(task_range, experiment_config):
             safe_reward_model = experiment_config.global_reward_text_model.replace('/', '-')
             token_counts_filename = f"token_results/token_counts_{experiment_config.record_time}_{safe_planning_model}_{safe_reward_model}.json"
 
-        await run_task(mode=experiment_config.mode,
+        task_cost = await run_task(mode=experiment_config.mode,
                        task_mode=experiment_config.config['basic']['task_mode'],
                        task_name=task_name,
                        task_uuid=task_uuid,
@@ -163,6 +166,10 @@ async def run_experiment(task_range, experiment_config):
                        task_index=task_index,
                        record_time=experiment_config.record_time,
                        token_pricing=experiment_config.config['token_pricing'])
+
+        if task_cost:
+            cumulative_cost += task_cost
+            logger.info(f"Cumulative cost so far: ${cumulative_cost:.6f}")
 
         await env.close()
         del env
@@ -183,10 +190,14 @@ async def main(global_reward_mode="no_global_reward",
                raw_data_index=-1,
                observation_mode="dom",
                ground_truth_mode=False,
-               toml_path=None
+               toml_path=None,
+               custom_model=False
                ):
     config = read_config(toml_path)
     validate_config(config, observation_mode, global_reward_mode, planning_text_model, global_reward_text_model)
+
+    # Add custom_model flag to config for easy access throughout the codebase
+    config['model']['custom_model'] = custom_model
 
     file = None
     if config['basic']['task_mode'] == "batch_tasks":
@@ -211,7 +222,8 @@ async def main(global_reward_mode="no_global_reward",
         ground_truth_data=ground_truth_data,
         write_result_file_path=write_result_file_path,
         record_time=record_time,
-        file=file
+        file=file,
+        custom_model=custom_model
     )
 
     await run_experiment(task_range, experiment_config)
@@ -230,12 +242,15 @@ if __name__ == "__main__":
     # Use OpenRouter model format: provider/model-name
     parser.add_argument("--planning_text_model", type=str, default="openai/gpt-4o-mini")
     parser.add_argument("--global_reward_text_model", type=str, default="openai/gpt-4o-mini")
+    parser.add_argument("--custom_model", action="store_true",
+                        help="Use custom LLM endpoint (e.g., vLLM on RunPod). Requires CUSTOM_LLM_API_KEY and CUSTOM_LLM_BASE_URL env vars.")
 
     args = parser.parse_args()
 
     asyncio.run(main(global_reward_mode=args.global_reward_mode,
                      planning_text_model=args.planning_text_model,
                      global_reward_text_model=args.global_reward_text_model,
+                     custom_model=args.custom_model,
                      single_task_name=args.single_task_name,
                      raw_data_index=args.index
                      )

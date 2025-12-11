@@ -7,6 +7,7 @@ import json
 import traceback
 from agent.Prompt import *
 from ..Utils import *
+from agent.LLM.schemas import AgentActionSchema, RewardSchema, StepRewardSchema
 
 
 class ResponseError(Exception):
@@ -24,6 +25,13 @@ class ActionParser():
     # Extract Thought and Action from the results returned by LLM,
     # return thought (str) and action (dict), where action has four fields: action, element_id, action_input, description
     def extract_thought_and_action(self, message) -> tuple[str, dict]:
+        # Handle Pydantic AgentActionSchema objects
+        if isinstance(message, AgentActionSchema):
+            result_action = message.model_dump()
+            result_thought = result_action.get("thought")
+            return result_thought, result_action
+
+        # Handle string responses (fallback to regex parsing)
         result_action = None
         try:
             result_action = re.findall("```(.*?)```", message, re.S)[0]
@@ -66,12 +74,26 @@ class ActionParser():
             return result_dict
 
     def parse_action(self, message):
+        # Try parsing the entire message as JSON first (for structured outputs)
+        try:
+            decoded_result = json5.loads(message.strip())
+            return decoded_result
+        except:
+            pass
+
+        # Fall back to extracting JSON from code blocks
         message_substring = extract_longest_substring(message)
-        decoded_result = {}
+        if not message_substring or message_substring.strip() == "":
+            raise ValueError(f"Unable to extract valid JSON from message: {message[:200]}...")
         decoded_result = json5.loads(message_substring)
         return decoded_result
 
     def extract_status_and_description(self, message) -> dict:
+        # Handle Pydantic RewardSchema objects
+        if isinstance(message, (RewardSchema, StepRewardSchema)):
+            return message.model_dump()
+
+        # Handle string responses (fallback to regex parsing)
         try:
             description = re.findall("```(.*?)```", message, re.S)[0]
             status_description = self.parse_action(description)
