@@ -25,6 +25,12 @@ Existing frameworks for web agent development are either offline and static, or 
 ![Main Figure](src/main_figure.png)
 
 ## 🔥 News
+- **[2025, December]** OpenRouter Integration! Major improvements to LLM infrastructure:
+  - Migrated to [OpenRouter](https://openrouter.ai) for unified access to 200+ models from OpenAI, Anthropic, Google, Meta, and other providers
+  - Automatic cost tracking with real-time usage data from API responses
+  - Smart JSON mode with graceful degradation (structured outputs → json_object → instruction-based)
+  - Support for custom LLM endpoints (vLLM, text-generation-inference) via `--custom_model` flag
+  - Simplified configuration with single API key instead of multiple provider keys
 - **[2024, December 26]** v0.0.4 released! Major updates include:
   - Introduced a new JavaScript event listener-based evaluation system that decouples evaluation methods from action space, enabling assessment of purely visually-grounded agents
   - Integrated with [Browserbase](https://www.browserbase.com/) cloud browser environment for more stable and consistent evaluation
@@ -83,7 +89,20 @@ conda activate webcanvas
 pip install -r requirements.txt
 ```
 
-Before running the repos, you need to set up the required API keys as using features dependent on external APIs. Please refer to this [docs](agent/LLM/README.md).
+Before running the repos, you need to set up the required API keys:
+
+```bash
+# Required: OpenRouter API key for accessing various LLM providers
+export OPENROUTER_API_KEY=your_openrouter_api_key
+
+# Optional: Custom LLM endpoint (e.g., vLLM on RunPod)
+export CUSTOM_LLM_API_KEY=your_custom_api_key
+export CUSTOM_LLM_BASE_URL=your_custom_base_url
+```
+
+**Note**: After migrating to OpenRouter, you can now access models from OpenAI, Anthropic, Google, Meta, and other providers through a unified API. Get your OpenRouter API key at [https://openrouter.ai](https://openrouter.ai).
+
+For more details on LLM configuration, refer to [agent/LLM/README.md](agent/LLM/README.md).
 
 Also, you need to install the Node.js dependencies:
 
@@ -160,15 +179,26 @@ python data/raw_data_processor.py \
 You can run the repos with the following command:
 
 ```bash
+# Using OpenRouter models (default)
 python evaluate.py \
     --global_reward_mode dom_reward \
     --index -1 \
     --single_task_name "Find Dota 2 game and add all DLC to cart in steam." \
-    --planning_text_model gpt-4o-mini \
-    --global_reward_text_model gpt-4o-mini
+    --planning_text_model openai/gpt-4o-mini \
+    --global_reward_text_model openai/gpt-4o-mini
+
+# Using a custom LLM endpoint (e.g., vLLM on RunPod) for planning
+python evaluate.py \
+    --global_reward_mode dom_reward \
+    --index -1 \
+    --planning_text_model your-custom-model-name \
+    --global_reward_text_model openai/gpt-4o-mini \
+    --custom_model
 ```
 
-This command runs the script with DOM-based self-reward, processing the default task "Find Dota 2 game and add all DLC to cart in steam" or using the default data index -1. It also uses the gpt-4o-mini model for both observation and global reward processing. The evaluation mode is controlled by the `task_mode` parameter in `configs/setting.toml`, allowing you to choose between batch mode and single mode(without automatic evaluation). Remember to specify your path to the test file in `configs/setting.toml`.
+**Model Name Format**: Use OpenRouter's `provider/model-name` format (e.g., `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.1-70b-instruct`). See [OpenRouter Models](https://openrouter.ai/models) for available options.
+
+This command runs the script with DOM-based self-reward, processing all tasks (index -1) or a single task. The evaluation mode is controlled by the `task_mode` parameter in `configs/setting.toml`, allowing you to choose between batch mode and single mode (without automatic evaluation). Remember to specify your path to the test file in `configs/setting.toml`.
 
 
 ### Parameter Descriptions
@@ -195,11 +225,18 @@ This program supports several command-line arguments to customize its behavior:
 
 - `--planning_text_model`: Specifies the model used for planning module.
   - Type: String
-  - Default: `gpt-4o-mini`
+  - Default: `openai/gpt-4o-mini`
+  - Description: Use OpenRouter's `provider/model-name` format (e.g., `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `google/gemini-pro-1.5`). When using `--custom_model` flag, this should be the model name configured on your custom endpoint.
 
 - `--global_reward_text_model`: Specifies the model used for global reward reasoning.
   - Type: String
-  - Default: `gpt-4o-mini`
+  - Default: `openai/gpt-4o-mini`
+  - Description: Use OpenRouter's `provider/model-name` format. This model is always accessed via OpenRouter, even when `--custom_model` is set.
+
+- `--custom_model`: Use a custom LLM endpoint for the planning model.
+  - Type: Flag (no value needed)
+  - Default: False
+  - Description: When set, the planning model will use the custom endpoint specified by `CUSTOM_LLM_API_KEY` and `CUSTOM_LLM_BASE_URL` environment variables. The endpoint must be OpenAI-compatible (e.g., vLLM, text-generation-inference). Note that only the planning model uses the custom endpoint; vision models (gpt-4-turbo) and reward models still use OpenRouter.
 
 #### Interaction Mode
 
@@ -226,16 +263,20 @@ Replace the placeholders with your actual values:
 
 You can also submit through our platform. We will conduct an official check on your submission to prevent cheating.
 
-### <a id="usd_efficiency"></a>Token Consumption Calculation
+### <a id="usd_efficiency"></a>Token Consumption and Cost Tracking
 
-We provide a token consumption calculation functionality for evaluating the efficiency of your agent, and it is enabled automatically.
-The token consumption is calculated based on the number of tokens consumed by planning module and global reward reasoning module(if applicable) during the evaluation process. 
-The token consumption calculation results of each experiment will be saved in the `token_results` folder in JSON format.  
+We provide automatic token consumption and cost tracking for evaluating the efficiency of your agent.
+The token consumption is calculated based on the number of tokens consumed by planning module and global reward reasoning module (if applicable) during the evaluation process.
+The consumption results of each experiment will be saved in the `token_results` folder and in the task result JSON files.
 
-We use the `tiktoken` package to calculate the consumption of tokens. For those models whose encodings cannot be obtained, the default encoding "cl100k_base" is used. Therefore, for non-OPENAI models, the calculated tokens may have certain deviations. 
+**After OpenRouter Migration**: Cost data is now automatically retrieved from the OpenRouter API for all requests. Each task result includes:
+- `planning_cost`: Cost incurred by the planning module
+- `reward_cost`: Cost incurred by the reward module (if applicable)
+- `total_cost`: Total cost for the task
 
-The amount spent on tokens is only available when the model name is provided in the 'token_pricing' under setting.toml; otherwise, only the quantity of tokens will be counted.
-If you want to calculate the monetary expenditure of models not listed in 'token_pricing', you should first add the full name of the model (such as "gpt-4o-2024-05-13") to the 'pricing_models' list. Then, add the unit price of input and output for this model below the list, such as "gpt-4o-2024-05-13_input_price = 0.000005" and "gpt-4o-2024-05-13_output_price = 0.000015".
+The cumulative cost across all tasks is displayed in the logs and saved in the final results.
+
+**Legacy Token Pricing (Optional)**: The `token_pricing` section in `configs/setting.toml` is now deprecated but kept for backward compatibility. OpenRouter provides actual costs directly via the API, so manual price configuration is no longer necessary. The legacy pricing is only used as a fallback if API cost data is unavailable.
 
 Few example results on Mind2Web-Live test set:
 <table>
