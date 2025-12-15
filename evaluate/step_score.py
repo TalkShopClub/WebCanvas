@@ -195,8 +195,8 @@ class TextEvaluator(StepEvaluator):
         return result_score
 
     @staticmethod
-    def text_semantic_match(input_answer, semantic_method):
-        result_score = MatchFunction.semantic_match(
+    async def text_semantic_match(input_answer, semantic_method):
+        result_score = await MatchFunction.semantic_match(
             input_answer, semantic_method)
         return result_score
 

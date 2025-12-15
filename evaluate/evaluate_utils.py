@@ -247,7 +247,7 @@ async def step_evaluate(page: Page, evaluate_steps=[], input_path=None, element_
                         text_content, evaluate["reference_answer"])
             elif match_function == "cache_data_semantic_match":
                 if text_content is not None and text_content != "":
-                    score = TextEvaluator.text_semantic_match(
+                    score = await TextEvaluator.text_semantic_match(
                         text_content, evaluate["reference_answer"])
             elif match_function == "final_answer_exact_match":
                 if text_content is not None and text_content != "":
@@ -259,7 +259,7 @@ async def step_evaluate(page: Page, evaluate_steps=[], input_path=None, element_
                         text_content, evaluate["reference_answer"])
             elif match_function == "final_answer_semantic_match":
                 if text_content is not None and text_content != "":
-                    score = TextEvaluator.text_semantic_match(
+                    score = await TextEvaluator.text_semantic_match(
                         text_content, evaluate["reference_answer"])
 
             evaluate["score"] = max(evaluate["score"], score)
@@ -296,7 +296,7 @@ async def step_event_evaluate(page: Page, evaluate_steps, env):
                     page.url, evaluate["reference_answer"], evaluate["key"]
                 )
             elif match_function == "url_semantic_match":
-                score = URLEvaluator.url_semantic_match(
+                score = await URLEvaluator.url_semantic_match(
                     page.url, evaluate["reference_answer"], evaluate["key"]
                 )
 
@@ -323,7 +323,7 @@ async def step_event_evaluate(page: Page, evaluate_steps, env):
                 )
 
             elif match_function == "element_value_semantic_match":
-                score = ElementEvaluator4Param.element_value_semantic_match(
+                score = await ElementEvaluator4Param.element_value_semantic_match(
                     event["target_value"], evaluate["reference_answer"]
                 )
 
@@ -528,6 +528,7 @@ async def run_task(
             except Exception as e:
                 out_put = None
                 response_error_count += 1
+                import traceback
                 traceback.print_exc()
                 continue
 

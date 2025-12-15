@@ -35,8 +35,11 @@ async def semantic_match_llm_request(messages: list = None):
     Make a semantic matching request using the default model.
 
     Uses OpenRouter with a configurable default model and SemanticMatchSchema for structured output.
+
+    Returns:
+        tuple: (response, usage_data) for backward compatibility with existing code
     """
     default_model = os.getenv("OPENROUTER_DEFAULT_MODEL", "openai/gpt-5-mini")
     llm = OpenRouterGenerator(model=default_model, json_mode=True, schema=SemanticMatchSchema)
     response, error, usage_data = await llm.request(messages)
-    return response
+    return response, usage_data

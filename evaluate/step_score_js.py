@@ -56,7 +56,7 @@ class URLEvaluator(StepEvaluator):
         return result_score
 
     @staticmethod
-    def url_semantic_match(input_url, semantic_method, key=False):
+    async def url_semantic_match(input_url, semantic_method, key=False):
         if key:
             try:
                 parsed_url = urlparse(input_url)
@@ -67,7 +67,7 @@ class URLEvaluator(StepEvaluator):
         else:
             input_answer = input_url
         input_answer = unquote(input_answer)
-        result_score = MatchFunction.semantic_match(input_answer, semantic_method)
+        result_score = await MatchFunction.semantic_match(input_answer, semantic_method)
         return result_score
 
 class ElementEvaluator(StepEvaluator):
@@ -164,11 +164,11 @@ class ElementEvaluator(StepEvaluator):
         return result_score
 
     @staticmethod
-    def element_value_semantic_match(input_answer, semantic_method):
+    async def element_value_semantic_match(input_answer, semantic_method):
         # TODO fuzzy check if the input_answer is on the same page as the reference_answer
         if len(input_answer) == 0:
             return 0
-        result_score = MatchFunction.semantic_match(input_answer, semantic_method)
+        result_score = await MatchFunction.semantic_match(input_answer, semantic_method)
         return result_score
 
 class TextEvaluator(StepEvaluator):
@@ -185,8 +185,8 @@ class TextEvaluator(StepEvaluator):
         return result_score
 
     @staticmethod
-    def text_semantic_match(input_answer, semantic_method):
-        result_score = MatchFunction.semantic_match(input_answer, semantic_method, semantic_method)
+    async def text_semantic_match(input_answer, semantic_method):
+        result_score = await MatchFunction.semantic_match(input_answer, semantic_method)
         return result_score
 
 
